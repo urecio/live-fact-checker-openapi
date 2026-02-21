@@ -38,10 +38,16 @@
   <!-- ====== SETTINGS PANEL (hidden by default) ====== -->
   <div id="settingsPanel" class="settings-panel hidden">
     <div class="settings-group">
-      <label data-i18n="settings_apikey">Gemini API Key</label>
-      <input type="password" id="apiKeyInput" placeholder="AIza..." spellcheck="false">
+      <label data-i18n="settings_apikey">OpenAI API Key</label>
+      <input type="password" id="apiKeyInput" placeholder="sk-..." spellcheck="false">
     </div>
     <div class="settings-group">
+      <label class="radio-label">
+        <input type="checkbox" id="transcribeOnlyCheckbox">
+        <span data-i18n="settings_transcribe_only">Transcribe only (fact-check manually via right-click)</span>
+      </label>
+    </div>
+    <div id="intervalGroup" class="settings-group">
       <label data-i18n="settings_interval">Check Interval</label>
       <div class="radio-row">
         <label class="radio-label"><input type="radio" name="interval" value="5000"> ~5s</label>
@@ -156,6 +162,7 @@
     <div id="transcript" class="transcript">
       <p class="placeholder-text" data-i18n="transcript_placeholder">Transcript will appear here once you start...</p>
     </div>
+    <button id="factCheckSelectionBtn" class="fact-check-selection-btn hidden" data-i18n="btn_fact_check_selection">Fact-check selected text</button>
   </div>
 
   <!-- ====== CLAIM HOVER TOOLTIP ====== -->
