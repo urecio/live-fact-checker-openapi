@@ -4,14 +4,14 @@ A Chrome extension that fact-checks YouTube videos and live streams **in real ti
 
 ![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome&logoColor=white)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-green)
-![Gemini](https://img.shields.io/badge/Powered_by-Gemini_2.0_Flash-blue)
+![OpenAI](https://img.shields.io/badge/Powered_by-OpenAI_o4--mini-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ## How It Works
 
 1. **Transcribe** — captures speech via YouTube captions, tab audio (local Whisper), or your microphone
-2. **Identify** — Gemini finds specific, verifiable factual claims in the transcript
-3. **Verify** — each claim is checked with Gemini's grounded Google Search, rated TRUE / FALSE / UNCERTAIN
+2. **Identify** — OpenAI o4-mini finds specific, verifiable factual claims in the transcript
+3. **Verify** — each claim is checked with OpenAI's web search tool, rated TRUE / FALSE / UNCERTAIN
 4. **Display** — claims are highlighted inline with color-coded results and hover tooltips
 
 ## Features
@@ -28,9 +28,9 @@ A Chrome extension that fact-checks YouTube videos and live streams **in real ti
 
 ## Installation
 
-1. **Get a Gemini API Key**
-   - Go to [Google AI Studio](https://aistudio.google.com/apikey) and create a free API key
-   - The free tier gives you 15 requests/minute and 1,500 requests/day — plenty for real-time checking
+1. **Get an OpenAI API Key**
+   - Go to [OpenAI Platform](https://platform.openai.com/api-keys) and create an API key
+   - You'll need a funded account — o4-mini is affordable for real-time checking
 
 2. **Clone this repo**
    ```bash
@@ -44,7 +44,7 @@ A Chrome extension that fact-checks YouTube videos and live streams **in real ti
 
 4. **Configure**
    - Click the extension icon to open the side panel
-   - Click the ⚙️ gear icon and paste your Gemini API key
+   - Click the ⚙️ gear icon and paste your OpenAI API key
    - Choose your language (English / Español)
    - Pick a transcription mode
 
@@ -96,15 +96,9 @@ live-fact-checker/
 | Language | English, Español | English |
 | Transcription Mode | YouTube CC, Tab Audio (Whisper), Microphone | YouTube CC |
 
-## API Limits (Free Tier)
+## API Limits
 
-| Limit | Value |
-|---|---|
-| Requests per minute | 15 RPM |
-| Requests per day | 1,500 RPD |
-| Tokens per minute | 1,000,000 TPM |
-
-The extension stays well within these limits. For heavier use, upgrade to [Gemini's paid tier](https://ai.google.dev/pricing).
+Rate limits depend on your OpenAI account tier. The extension includes a built-in rate limiter that stays within conservative limits. See [OpenAI rate limits](https://platform.openai.com/docs/guides/rate-limits) for details.
 
 ## Contributing
 
@@ -120,7 +114,7 @@ Contributions are welcome! Some ideas:
 Built by [@alandaitch](https://twitter.com/alandaitch)
 
 Powered by:
-- [Gemini 2.0 Flash](https://ai.google.dev/) — claim identification and grounded verification
+- [OpenAI o4-mini](https://platform.openai.com/docs/models/o4-mini) — claim identification and web-grounded verification
 - [Whisper](https://huggingface.co/Xenova/whisper-tiny) via [transformers.js](https://github.com/xenova/transformers.js) — local audio transcription
 - [Chrome Side Panel API](https://developer.chrome.com/docs/extensions/reference/api/sidePanel)
 

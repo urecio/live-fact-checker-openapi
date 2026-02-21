@@ -37,6 +37,7 @@
     checkInterval: 10000,
     minWords: 20,
     language: 'auto',  // 'auto' = use Chrome's language
+    transcribeOnly: false,  // when true, only transcribe — user fact-checks via right-click
 
     checkTimer: null,
     recognition: null,
@@ -64,7 +65,7 @@
   const dom = {
     statusDot: $('#statusDot'), statusText: $('#statusText'),
     settingsBtn: $('#settingsBtn'), settingsPanel: $('#settingsPanel'),
-    apiKeyInput: $('#apiKeyInput'), langSelect: $('#langSelect'), saveSettingsBtn: $('#saveSettingsBtn'),
+    apiKeyInput: $('#apiKeyInput'), langSelect: $('#langSelect'), saveSettingsBtn: $('#saveSettingsBtn'), transcribeOnlyCheckbox: $('#transcribeOnlyCheckbox'), intervalGroup: $('#intervalGroup'), factCheckSelectionBtn: $('#factCheckSelectionBtn'),
     contextToggle: $('#contextToggle'), contextFields: $('#contextFields'),
     contextBadge: $('#contextBadge'),
     ctxSpeaker: $('#ctxSpeaker'), ctxEvent: $('#ctxEvent'), ctxCustom: $('#ctxCustom'),
@@ -89,7 +90,8 @@
   const i18n = {
     en: {
       status_ready: 'Ready — pick a mode and press Start',
-      settings_apikey: 'Gemini API Key',
+      settings_apikey: 'OpenAI API Key',
+      settings_transcribe_only: 'Transcribe only (fact-check manually via right-click)',
       settings_interval: 'Check Interval',
       settings_language: 'Language',
       settings_language_hint: 'Affects transcription, analysis language, and the interface.',
@@ -139,6 +141,7 @@
       modal_sources: 'Sources',
       modal_confidence: 'Confidence',
       btn_analyze_now: 'Analyze Video',
+      btn_fact_check_selection: 'Fact-check selected text',
       tooltip_click: 'Click for full details',
       status_fetching_transcript: 'Fetching full transcript...',
       status_no_transcript: 'No transcript available for this video',
@@ -154,7 +157,8 @@
     },
     es: {
       status_ready: 'Listo — elegí un modo y presioná Iniciar',
-      settings_apikey: 'Clave API de Gemini',
+      settings_apikey: 'Clave API de OpenAI',
+      settings_transcribe_only: 'Solo transcribir (verificar manualmente con clic derecho)',
       settings_interval: 'Intervalo de chequeo',
       settings_language: 'Idioma',
       settings_language_hint: 'Afecta la transcripción, el idioma del análisis y la interfaz.',
@@ -204,6 +208,7 @@
       modal_sources: 'Fuentes',
       modal_confidence: 'Confianza',
       btn_analyze_now: 'Analizar Video',
+      btn_fact_check_selection: 'Verificar texto seleccionado',
       tooltip_click: 'Clic para ver detalles',
       status_fetching_transcript: 'Obteniendo transcripción completa...',
       status_no_transcript: 'No hay transcripción disponible para este video',
@@ -257,14 +262,17 @@
   // ==========================================================
   async function loadSettings() {
     return new Promise(r => {
-      chrome.storage.local.get(['apiKey','checkInterval','mode','language','clarifications'], d => {
+      chrome.storage.local.get(['apiKey','checkInterval','mode','language','clarifications','transcribeOnly'], d => {
         if (d.apiKey)         state.apiKey = d.apiKey;
         if (d.checkInterval)  state.checkInterval = d.checkInterval;
         if (d.mode)           state.mode = d.mode;
         if (d.language)       state.language = d.language;
         if (d.clarifications) state.clarifications = d.clarifications;
+        if (d.transcribeOnly !== undefined) state.transcribeOnly = d.transcribeOnly;
         dom.apiKeyInput.value = state.apiKey;
         dom.langSelect.value = state.language;
+        dom.transcribeOnlyCheckbox.checked = state.transcribeOnly;
+        dom.intervalGroup.style.display = state.transcribeOnly ? 'none' : '';
         const intRadio = document.querySelector(`input[name="interval"][value="${state.checkInterval}"]`);
         if (intRadio) intRadio.checked = true;
         const modeRadio = document.querySelector(`input[name="mode"][value="${state.mode}"]`);
@@ -279,7 +287,8 @@
     state.checkInterval = +(document.querySelector('input[name="interval"]:checked')?.value || 10000);
     state.mode = document.querySelector('input[name="mode"]:checked')?.value || 'youtube';
     state.language = dom.langSelect.value || 'en';
-    chrome.storage.local.set({ apiKey: state.apiKey, checkInterval: state.checkInterval, mode: state.mode, language: state.language, clarifications: state.clarifications });
+    state.transcribeOnly = dom.transcribeOnlyCheckbox.checked;
+    chrome.storage.local.set({ apiKey: state.apiKey, checkInterval: state.checkInterval, mode: state.mode, language: state.language, clarifications: state.clarifications, transcribeOnly: state.transcribeOnly });
     applyLanguage();
   }
 
@@ -289,6 +298,27 @@
   function setupUI() {
     dom.settingsBtn.onclick = () => dom.settingsPanel.classList.toggle('hidden');
     dom.saveSettingsBtn.onclick = () => { saveSettings(); dom.settingsPanel.classList.add('hidden'); setStatus(t('status_settings_saved')); };
+    dom.transcribeOnlyCheckbox.onchange = () => { dom.intervalGroup.style.display = dom.transcribeOnlyCheckbox.checked ? 'none' : ''; };
+
+    // Show/hide fact-check button based on text selection in the transcript
+    document.addEventListener('selectionchange', () => {
+      const sel = window.getSelection();
+      const text = sel?.toString().trim();
+      if (text && text.length >= 5 && dom.transcript.contains(sel.anchorNode)) {
+        dom.factCheckSelectionBtn.classList.remove('hidden');
+      } else {
+        dom.factCheckSelectionBtn.classList.add('hidden');
+      }
+    });
+    dom.factCheckSelectionBtn.onclick = () => {
+      const sel = window.getSelection();
+      const text = sel?.toString().trim();
+      if (text && text.length >= 5) {
+        factCheckSelection(text);
+        sel.removeAllRanges();
+        dom.factCheckSelectionBtn.classList.add('hidden');
+      }
+    };
     dom.contextToggle.onclick = () => { dom.contextFields.classList.toggle('hidden'); dom.contextToggle.classList.toggle('open'); };
     dom.startBtn.onclick = startFactChecking;
     dom.stopBtn.onclick = stopFactChecking;
@@ -405,10 +435,10 @@
       startMicMode();
     }
 
-    // Use adaptive timer instead of fixed interval
-    // Free tier: 15 RPM = 1 call every 4s. With identify (1) + verify (up to 3),
-    // that's 4 calls per round = need ~16s minimum between rounds.
-    scheduleNextClaimCheck();
+    // In transcribe-only mode, skip auto claim checking — user fact-checks via right-click
+    if (!state.transcribeOnly) {
+      scheduleNextClaimCheck();
+    }
   }
 
   function getAdaptiveInterval() {
@@ -1018,26 +1048,62 @@
       else if (msg.type === 'CONTENT_STATUS') {
         setStatus(msg.message, 'checking');
       }
+      else if (msg.type === 'FACT_CHECK_SELECTION' && msg.text) {
+        factCheckSelection(msg.text.trim());
+      }
     });
   }
 
-  // ==========================================================
-  // GEMINI API — budget-based rate limiter
-  // ==========================================================
-  // Gemini 2.0 Flash free tier limits:
-  //   - 15 requests per minute (RPM)
-  //   - 1,000,000 tokens per minute (TPM)
-  //   - 1,500 requests per day (RPD)
-  // We track a sliding window of request timestamps to NEVER exceed these.
-  // ==========================================================
-  const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models';
+  async function factCheckSelection(text) {
+    if (!state.apiKey) {
+      setStatus('Set your OpenAI API key in Settings first', 'error');
+      return;
+    }
+    if (text.length < 5) return;
 
-  const RPM_LIMIT = 14;           // stay 1 under the 15 RPM hard limit
-  const RPD_LIMIT = 1400;         // stay under the 1500 RPD hard limit
-  const requestLog = [];          // timestamps of all API calls
+    // Grab recent transcript for surrounding context
+    const recentEntries = state.transcript.slice(-30);
+    const transcriptContext = recentEntries.map(e => e.text).join(' ').slice(-2000);
+
+    // Create a claim object directly — skip identification since the user selected it
+    const id = 'c-' + (++state.claimIdCounter);
+    const obj = {
+      id,
+      text: text,
+      summary: text,
+      searchQuery: text,
+      transcriptContext: transcriptContext,
+      status: 'pending',
+      verdict: null,
+      explanation: '',
+      sources: [],
+      confidence: 0,
+      needsClarification: false,
+      clarificationQuestion: null,
+    };
+    state.claims.set(id, obj);
+    // Highlight the selected text in the existing transcript
+    highlightClaimInTranscript(obj);
+    updateStats();
+    dom.statsBar.classList.remove('hidden');
+    setStatus('Verifying selected claim...', 'checking');
+    queueVerification(obj);
+  }
+
+  // ==========================================================
+  // OPENAI API — budget-based rate limiter
+  // ==========================================================
+  // o4-mini rate limits vary by tier. We use conservative defaults.
+  // We track a sliding window of request timestamps to stay under limits.
+  // ==========================================================
+  const OPENAI_URL = 'https://api.openai.com/v1/responses';
+
+  const RPM_LIMIT = 30;            // conservative for most tiers
+  const RPD_LIMIT = 10000;         // conservative daily limit
+  const requestLog = [];           // timestamps of all API calls
   let dailyRequestCount = 0;
   let dailyResetTime = Date.now() + 86400000;
-  let serverBackoffUntil = 0;     // if we DO get a 429, respect server's retry-after
+  let serverBackoffUntil = 0;      // if we DO get a 429, respect server's retry-after
   let pendingVerifications = [];
   let isProcessingQueue = false;
 
@@ -1077,41 +1143,50 @@
     dailyRequestCount++;
   }
 
-  async function callGemini(prompt, { grounded = false, temperature = 0.1, maxTokens = 1024, jsonMode = false, jsonSchema = null } = {}) {
+  async function callOpenAI(prompt, { grounded = false, maxTokens = 1024, jsonMode = false, jsonSchema = null } = {}) {
     await acquireSlot();
 
-    const model = 'gemini-2.0-flash';
-    const url = `${GEMINI}/${model}:generateContent?key=${state.apiKey}`;
-    const genConfig = { temperature, maxOutputTokens: maxTokens };
+    const body = {
+      model: 'o4-mini',
+      input: [{ role: 'user', content: prompt }],
+      reasoning: { effort: 'low' },
+    };
 
-    // Force JSON output when not using grounding (grounding + JSON mode is unsupported)
-    if (jsonMode && !grounded) {
-      genConfig.responseMimeType = 'application/json';
-      if (jsonSchema) genConfig.responseSchema = jsonSchema;
+    if (maxTokens) body.max_output_tokens = maxTokens;
+
+    // Structured JSON output
+    if (jsonMode && jsonSchema) {
+      body.text = {
+        format: {
+          type: 'json_schema',
+          name: jsonSchema.name || 'response',
+          schema: jsonSchema.schema,
+          strict: true,
+        }
+      };
+    } else if (jsonMode) {
+      body.text = { format: { type: 'json_object' } };
     }
 
-    const body = {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: genConfig
-    };
-    if (grounded) body.tools = [{ google_search: {} }];
+    // Web search for grounded verification
+    if (grounded) {
+      body.tools = [{ type: 'web_search', search_context_size: 'high' }];
+    }
 
-    const r = await fetch(url, {
+    const r = await fetch(OPENAI_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${state.apiKey}`,
+      },
       body: JSON.stringify(body)
     });
 
     if (r.status === 429) {
-      // Parse server-suggested retry delay
       let waitMs = 30000;
       try {
-        const errBody = await r.json();
-        const retryInfo = errBody.error?.details?.find(d => d['@type']?.includes('RetryInfo'));
-        if (retryInfo?.retryDelay) {
-          const s = retryInfo.retryDelay.match(/([\d.]+)s/);
-          if (s) waitMs = Math.ceil(parseFloat(s[1]) * 1000) + 1000;
-        }
+        const retryAfter = r.headers.get('Retry-After');
+        if (retryAfter) waitMs = (parseInt(retryAfter, 10) || 30) * 1000 + 1000;
       } catch {}
       serverBackoffUntil = Date.now() + waitMs;
       console.log(`[Budget] 429 received. Server says wait ${Math.round(waitMs/1000)}s`);
@@ -1120,16 +1195,42 @@
 
     if (!r.ok) {
       const errText = await r.text();
-      throw new Error(`Gemini ${r.status}: ${errText.substring(0, 200)}`);
+      throw new Error(`OpenAI ${r.status}: ${errText.substring(0, 200)}`);
     }
 
     const d = await r.json();
-    if (!d.candidates?.length) throw new Error('No candidates');
-    const c = d.candidates[0];
-    const text = c.content?.parts?.[0]?.text || '';
+
+    // Extract text and sources from Responses API output
+    let text = '';
     let sources = [];
-    if (c.groundingMetadata?.groundingChunks)
-      sources = c.groundingMetadata.groundingChunks.filter(x=>x.web).map(x=>({url:x.web.uri, title:x.web.title||x.web.uri}));
+
+    if (d.output) {
+      for (const item of d.output) {
+        if (item.type === 'message' && item.content) {
+          for (const block of item.content) {
+            if (block.type === 'output_text') {
+              text += block.text;
+              // Extract web search citations from annotations
+              if (block.annotations) {
+                for (const ann of block.annotations) {
+                  if (ann.type === 'url_citation') {
+                    sources.push({ url: ann.url, title: ann.title || ann.url });
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (!text && d.output_text) text = d.output_text;
+    if (!text) throw new Error('No output in response');
+
+    // Deduplicate sources by URL
+    const seen = new Set();
+    sources = sources.filter(s => { if (seen.has(s.url)) return false; seen.add(s.url); return true; });
+
     return { text, sources };
   }
 
@@ -1140,7 +1241,7 @@
     // Try direct parse
     try { return JSON.parse(cleaned); } catch {}
     // Try to extract JSON object or array from surrounding text
-    // Use the LAST { or [ that leads to valid JSON (Gemini often adds preamble)
+    // Use the LAST { or [ that leads to valid JSON (LLMs often add preamble)
     for (const startChar of ['{', '[']) {
       const endChar = startChar === '{' ? '}' : ']';
       const lastStart = cleaned.lastIndexOf(startChar);
@@ -1158,8 +1259,8 @@
   }
 
   /**
-   * Fallback for grounded verification calls (which can't use JSON mode).
-   * When Gemini returns a prose response instead of JSON, this extracts
+   * Fallback for grounded verification calls that may return prose.
+   * When the model returns a prose response instead of JSON, this extracts
    * the verdict, confidence, and explanation from the natural language text.
    */
   function extractVerdictFromProse(text) {
@@ -1332,23 +1433,36 @@ RULES:
 JSON array (or []):
 [{"claim":"verbatim quote from transcript","summary":"testable assertion in ${langName}","searchQuery":"specific data-finding query"}]`;
     const claimSchema = {
-      type: 'ARRAY',
-      items: {
-        type: 'OBJECT',
+      name: 'claims',
+      schema: {
+        type: 'object',
         properties: {
-          claim: { type: 'STRING' },
-          summary: { type: 'STRING' },
-          searchQuery: { type: 'STRING' }
+          claims: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                claim: { type: 'string' },
+                summary: { type: 'string' },
+                searchQuery: { type: 'string' }
+              },
+              required: ['claim', 'summary', 'searchQuery'],
+              additionalProperties: false,
+            }
+          }
         },
-        required: ['claim', 'summary', 'searchQuery']
+        required: ['claims'],
+        additionalProperties: false,
       }
     };
-    const r = await callGemini(prompt, { temperature: 0.05, maxTokens: 512, jsonMode: true, jsonSchema: claimSchema });
+    const r = await callOpenAI(prompt, { maxTokens: 512, jsonMode: true, jsonSchema: claimSchema });
     const parsed = parseJSON(r.text);
-    if (!Array.isArray(parsed)) {
+    // Schema wraps array in { claims: [...] } for OpenAI strict mode
+    const claims = parsed?.claims ?? (Array.isArray(parsed) ? parsed : null);
+    if (!Array.isArray(claims)) {
       console.warn('[FactChecker] Failed to parse identification response. Raw text:', r.text);
     }
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(claims) ? claims : [];
   }
 
   // ==========================================================
@@ -1360,15 +1474,19 @@ JSON array (or []):
     const langName = langNames[lang] || 'the same language as the claim';
     const prompt = `You are an aggressive fact-checker. Your job: FIND THE DATA. Do NOT say "difficult to verify" — SEARCH for it. Respond in ${langName}.
 
-CONTEXT: ${getContextString()}
+CONTEXT: ${getContextString()}${claim.transcriptContext ? `\nSURROUNDING TRANSCRIPT (for context — the claim was selected from within this text):\n"""${claim.transcriptContext}"""\n` : ''}
 CLAIM: "${claim.summary || claim.text}"
 Original: "${claim.text}"
 
-YOU HAVE GOOGLE SEARCH. USE IT. Most economic, demographic, and political claims CAN be verified using:
-- Official statistics agencies (INDEC, BLS, Eurostat, World Bank, IMF)
+YOU HAVE WEB SEARCH. USE IT. You MUST prioritize authoritative, academic, and official sources:
+- Peer-reviewed scientific articles and journals (PubMed, Nature, Science, The Lancet, PNAS, arXiv, Google Scholar)
+- Official statistics agencies (INDEC, BLS, Eurostat, World Bank, IMF, UN Data)
 - Central bank reports (BCRA, Fed, ECB)
-- Fact-checking organizations (Chequeado, PolitiFact, FullFact)
-- News archives and government reports
+- Government reports and official publications (.gov, .edu domains)
+- Academic research institutions and university publications
+- Fact-checking organizations (Chequeado, PolitiFact, FullFact, Snopes)
+NEVER use Wikipedia, blog posts, social media, or unverified websites as primary sources.
+If a claim involves science, health, or research, you MUST cite peer-reviewed studies or official institutional data.
 Do NOT assume data is unavailable. SEARCH for it. If you truly cannot find ANY data after searching, only THEN mark UNCERTAIN.
 
 DECISION RULES:
@@ -1392,9 +1510,9 @@ CRITICAL: Your ENTIRE response must be a single JSON object. No text before or a
 {"verdict":"TRUE|FALSE|UNCERTAIN","confidence":0.0-1.0,"explanation":"Claim says [X]. Official data from [source] shows [Y]. Therefore [verdict reasoning]","needsClarification":false,"clarificationQuestion":null}`;
 
     try {
-      const r = await callGemini(prompt, { grounded: true, maxTokens: 1024 });
+      const r = await callOpenAI(prompt, { grounded: true, maxTokens: 1024 });
       let p = parseJSON(r.text);
-      // Grounded calls can't use JSON mode, so Gemini sometimes responds in prose.
+      // Web search responses may not always be valid JSON.
       // If parseJSON fails, try to extract verdict from the natural language response.
       if (!p && r.text && r.text.length > 10) {
         console.warn('[FactChecker] Grounded response was not JSON, extracting from prose:', r.text.substring(0, 200));
@@ -1457,9 +1575,9 @@ CRITICAL: Your ENTIRE response must be a single JSON object. No text before or a
   }
 
   async function reVerify(claim, question, answer) {
-    const prompt = `Verify claim with context. ${getContextString()}\nQ: ${question} A: ${answer}\nCLAIM: "${claim.text}"\nJSON: {"verdict":"TRUE|FALSE|UNCERTAIN","confidence":0-1,"explanation":"..."}`;
+    const prompt = `Verify claim with context. Use ONLY authoritative sources: peer-reviewed studies, official statistics, government reports, academic publications. NEVER cite Wikipedia or blogs. ${getContextString()}\nQ: ${question} A: ${answer}\nCLAIM: "${claim.text}"\nJSON: {"verdict":"TRUE|FALSE|UNCERTAIN","confidence":0-1,"explanation":"..."}`;
     try {
-      const r = await callGemini(prompt, { grounded: true, maxTokens: 512 });
+      const r = await callOpenAI(prompt, { grounded: true, maxTokens: 512 });
       const p = parseJSON(r.text);
       if (p) { claim.status='verified'; claim.verdict=(p.verdict||'UNCERTAIN').toUpperCase(); claim.confidence=p.confidence||0.5; claim.explanation=p.explanation||''; claim.sources=r.sources||[]; claim.needsClarification=false; }
     } catch { claim.status='verified'; claim.verdict='UNCERTAIN'; claim.explanation='Re-verification failed.'; }
@@ -1814,7 +1932,7 @@ mark{padding:1px 3px;border-radius:3px;border-bottom:2px solid transparent}
 </div>
 <div class="report-footer">
   Live Fact Checker by <a href="https://twitter.com/alandaitch" target="_blank">@alandaitch</a><br>
-  Report generated on ${escapeHtml(dateStr)} at ${escapeHtml(timeStr)} &middot; Powered by Gemini + Whisper
+  Report generated on ${escapeHtml(dateStr)} at ${escapeHtml(timeStr)} &middot; Powered by OpenAI + Whisper
 </div>
 </body>
 </html>`;

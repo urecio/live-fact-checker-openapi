@@ -16,6 +16,9 @@ package-lock.json
 .env
 *.key
 
+# Task plans
+claude-tasks/
+
 # Chrome extension packaging
 *.crx
 *.pem

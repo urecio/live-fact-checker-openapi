@@ -4,6 +4,44 @@
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
+// ── Context menu: right-click selected text to fact-check ──
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({
+    id: 'fact-check-selection',
+    title: 'Fact-check "%s"',
+    contexts: ['selection'],
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === 'fact-check-selection' && info.selectionText) {
+    const sendFactCheck = () => {
+      setTimeout(() => {
+        chrome.runtime.sendMessage({
+          type: 'FACT_CHECK_SELECTION',
+          text: info.selectionText,
+        }).catch(() => {
+          // Sidepanel might not be listening yet, retry once
+          setTimeout(() => {
+            chrome.runtime.sendMessage({
+              type: 'FACT_CHECK_SELECTION',
+              text: info.selectionText,
+            }).catch(e => console.warn('[BG] Fact-check message failed:', e));
+          }, 1000);
+        });
+      }, 300);
+    };
+
+    // Try to open the side panel first (might already be open)
+    if (tab?.id) {
+      chrome.sidePanel.open({ tabId: tab.id }).then(sendFactCheck).catch(sendFactCheck);
+    } else {
+      // Right-click from within the sidepanel itself — panel is already open
+      sendFactCheck();
+    }
+  }
+});
+
 let activeTabId = null;
 
 // ── Helper: inject content script if needed, then send message ─
